@@ -11,7 +11,6 @@ import {
     ErrorDTO,
     DictionaryDTO,
 } from './contracts';
-import { isArray } from 'util';
 
 export interface IReportUploaderContext {
     report: ErrorReportDTO;
@@ -31,7 +30,7 @@ export class VanillaContext implements ContextCollectionProviderContext {
     public contextType = 'Vanilla';
     public contextCollections: ContextCollection[] = [];
 
-    constructor(public source: any, public error: Error) {}
+    constructor(public source: any, public error: Error) { }
 }
 
 export class Configuration {
@@ -55,6 +54,9 @@ export class Configuration {
 
     public contextFactories: ErrorReportContextFactory[] = [];
 
+    /** Currently running application version */
+    public applicationVersion: string = "";
+
     /**
      * optional uploader (default uses XmlHttpRequest).
      */
@@ -66,8 +68,27 @@ export class Configuration {
     }
 }
 
-export class Reporter {
-    public static instance: Reporter;
+export function getCoderrCollection(collections: ContextCollection[]) {
+    var col = collections.find(x => {
+        if (x.name === 'CoderrData') {
+            return x;
+        }
+    });
+    if (col) {
+        return col;
+    }
+
+    col = { name: 'CoderrData', properties: {} };
+    collections.push(col);
+    return col;
+}
+
+export interface IReporter {
+    reportByContext(context: ContextCollectionProviderContext): void;
+}
+
+export class Reporter implements IReporter {
+    public static instance: IReporter;
 
     constructor(
         private configuration: Configuration,
@@ -79,6 +100,7 @@ export class Reporter {
         ) {
             this.configuration.environmentName = 'Development';
         }
+        Reporter.instance = this;
     }
 
     public reportErr(error: Error, contextData: any = null) {
@@ -120,15 +142,21 @@ export class Reporter {
     public reportByContext(context: ContextCollectionProviderContext) {
         const allCollections: ContextCollection[] = [];
         allCollections.push(...context.contextCollections);
+
         this.configuration.providers.forEach(provider => {
             const collections = provider.collect(context);
             allCollections.push(...collections);
         });
 
+        if (this.configuration.applicationVersion !== ""){
+            var col = getCoderrCollection(allCollections);
+            col.properties['AppAssemblyVersion'] = this.configuration.applicationVersion;
+        }
+        
         const report: ErrorReportDTO = {
             ReportId: uniqueid(),
             CreatedAtUtc: new Date().toISOString(),
-            EnviromentName: this.configuration.environmentName,
+            EnvironmentName: this.configuration.environmentName,
             Exception: this.convertErrorToDto(context.error),
             ContextCollections: this.convertCollections(allCollections),
         };
@@ -165,7 +193,7 @@ export class Reporter {
             for (const key in item.properties) {
                 if (item.properties.hasOwnProperty(key)) {
                     const value = item.properties[key];
-                    dict[key] = value as any as string;
+                    dict[key] = (value as any) as string;
                 }
             }
 
